@@ -1,0 +1,26 @@
+{
+    "root": "../",
+    "data": "celeba",
+    "split": "interpretability",
+    "arch": "resnet101",
+    "resume": "",
+    "save": "celeba_res101_p9",
+
+    "workers": 4,
+    "epochs": 10,
+    "batch_size": 32,
+    "lr": 5e-3,
+    "weight_decay": 1e-4,
+    "print_freq": 200,
+    "num_classes": 40,
+    "nparts": 9,
+    "coeff": 0.1,
+    "radius": 2,
+    "std": 0.4,
+    "alpha": 1,
+    "beta": 0.001,
+    "seed": 1,
+
+    "fixed": [],
+    "finetune": ["conv1", "bn1", "layer1", "layer2", "layer3"]
+}

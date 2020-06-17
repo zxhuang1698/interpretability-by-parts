@@ -1,0 +1,26 @@
+{
+    "root": "root directory of the work space",
+    "data": "which dataset to use, currently only support celeba",
+    "split": "which dataset split to use, accuracy | interpretability",
+    "arch": "which base architecture to use: resnet101|resnet50",
+    "resume": "path to checkpoint for loading",
+    "save": "saving name for logs and checkpoints",
+
+    "workers": "number of data loading workers",
+    "epochs": "number of total epochs",
+    "batch_size": "training & testing batch size",
+    "lr": "learning rate",
+    "weight_decay": "weight decay",
+    "print_freq": "output printing period",
+    "num_classes": "number of attributes",
+    "nparts": "number of object parts to learn",
+    "coeff": "coefficient for the shaping loss",
+    "radius": "radius of the Gaussian blurring kernel over the assignment map before maxpooling",
+    "std": "standard deviation of the Gaussian blurring kernel over the assignment map before maxpooling",
+    "alpha": "alpha parameter for the beta prior (used in shaping loss)",
+    "beta": "beta parameter for the beta prior (used in shaping loss)",
+    "seed": "fix random seed for training",
+
+    "fixed": "a list of string indicating which layer to freeze, check the model code for layer names",
+    "finetune": "a list of string indicating which layer to fintune (20 times smaller lr), check the model code for layer names"
+}

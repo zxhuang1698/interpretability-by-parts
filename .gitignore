@@ -1,0 +1,8 @@
+**/__pycache__
+checkpoints/**
+visualization/**
+tensorboard_log/**
+log/**
+data/celeba/**
+!data/celeba/annotation.zip
+!data/celeba/data_processing.sh
