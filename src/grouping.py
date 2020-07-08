@@ -67,7 +67,7 @@ class GroupingUnit(nn.Module):
         beta_batch = beta_batch.expand(batch_size, -1, input_h, input_w)
         # assignment = softmax(-d/s) (-d must be negative)
         assign = (2 * cx - x_sq - c_sq).clamp(max=0.0) / beta_batch
-        assign = nn.functional.softmax(assign, dim=1) # default dim = 1
+        assign = nn.functional.softmax(assign, dim=1)
 
         # 3. compute residual coding
         # NCHW -> N * C * HW
@@ -79,15 +79,19 @@ class GroupingUnit(nn.Module):
         assign = assign.contiguous().view(batch_size, self.num_parts, -1)
         qx = torch.bmm(assign, x)
 
-        # repeat the graph_weights (K * C) -> (N * K * C)
+        # residual term
         c = grouping_centers
 
-        # sum of assignment (N * K * 1) -> (N * K * K)
+        # sum of assignment (N * K * HW) -> (N * K * 1)
         sum_ass = torch.sum(assign, dim=2, keepdim=True)
         
-        # residual coding N * K * C
+        # expand the summation of assignment (N * K * 1) -> (N * K * C) for normalization
         sum_ass = sum_ass.expand(-1, -1, self.in_channels).clamp(min=1e-5)
+
+        # calculate the sigma term
         sigma = (beta / 2).sqrt()
+
+        # calculate the residual coding 
         out = ((qx / sum_ass) - c) / sigma.unsqueeze(0).unsqueeze(2)
         
         # 4. prepare outputs
