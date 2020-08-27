@@ -22,6 +22,8 @@ The repository is still under construction. The full training, inference and eva
 
 ## Dataset
 
+### CelebA
+
 You will need to download both aligned and unaligned face images (JPEG format) in CelebA dataset at http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html. Make sure your ```data/celeba``` folder is structured as follows:
 
 ```
@@ -39,21 +41,33 @@ sh data_processing.sh
 ```
 It might take more than 30 minutes to uncompress all the data.
 
+### CUB 200
 
-## Example
+For Caltech-UCSD Birds-200-2011 (CUB-200) dataset, you will need to manually download the dataset at http://www.vision.caltech.edu/visipedia/CUB-200-2011.html and uncompress the tgz file into ```data/cub200```. Make sure your ```data/cub200``` folder is structured as follows:
+
+```
+├── CUB_200_2011/
+|   ├── images/
+|   ├── parts/
+|   ├── attributes/
+├── train_test_split.txt
+├── ...
+```
+
+## CelebA Example
 
 Helper for training parameters:
 
 ```sh
-cd src
+cd src/celeba
 python train.py --config-help
 ```
 ### Training (Unaligned CelebA from SCOPS)
 Training (You can specify the desired settings in celeba_res101.json):
 
 ```sh
-cd src
-python train.py --config ../celeba_res101.json
+cd src/celeba
+python train.py --config ../../celeba_res101.json
 ```
 
 The code will create three folders for model checkpoints (./checkpoint), log files (./log) and tensorboard logs (./tensorboard_log).
@@ -62,7 +76,7 @@ The code will create three folders for model checkpoints (./checkpoint), log fil
 Visualization of the results (assuming a ResNet 101 model trained with 9 parts):
 
 ```sh
-cd src
+cd src/celeba
 python visualize.py --load celeba_res101_p9
 ```
 The code will create a new folder (./visualization) for output images (25 by default).
@@ -70,7 +84,7 @@ The code will create a new folder (./visualization) for output images (25 by def
 Evaluating interpretability using part localization (assuming a ResNet101 model trained with 9 parts):
 
 ```sh
-cd src
+cd src/celeba
 python eval_interp.py --load celeba_res101_p9
 ```
 This should reproduce our results in Table 2.
@@ -78,7 +92,7 @@ This should reproduce our results in Table 2.
 Evaluating accuracy (assuming a ResNet101 model trained with 9 parts):
 
 ```sh
-cd src
+cd src/celeba
 python eval_acc.py --load celeba_res101_p9
 ```
 This will report the classification accuracy  (mean class accuracy) on the test set of SCOPS split.
@@ -87,15 +101,57 @@ This will report the classification accuracy  (mean class accuracy) on the test 
 Training (You need to change the split to *accuracy* in celeba_res101.json):
 
 ```sh
-cd src
-python train.py --config ../celeba_res101.json
+cd src/celeba
+python train.py --config ../../celeba_res101.json
 ```
 
 Evaluation:
 ```sh
-cd src
+cd src/celeba
 python eval_acc.py --load celeba_res101_p9
 ```
+
+## CUB-200 Example
+
+Helper for training parameters:
+
+```sh
+cd src/cub200
+python train.py --config-help
+```
+### Training
+Training (You can specify the desired settings in celeba_res101.json. The default configuration is slightly different from the paper to reduce GPU memory usage, so that the code can run on a single advanced graphic card.):
+
+```sh
+cd src/cub200
+python train.py --config ../../cub_res101.json
+```
+
+The code will create three folders for model checkpoints (./checkpoint), log files (./log) and tensorboard logs (./tensorboard_log). 
+
+### Visualization and Evaluation
+Visualization of the results (assuming a ResNet 101 model trained with 5 parts):
+
+```sh
+cd src/cub200
+python visualize.py --load cub_res101_p5
+```
+The code will create a new folder (./visualization) for output images (25 by default).
+
+Evaluating interpretability using part localization (assuming a ResNet101 model trained with 5 parts):
+
+```sh
+cd src/cub200
+python eval_interp.py --load cub_res101_p5
+```
+
+Evaluating accuracy (assuming a ResNet101 model trained with 5 parts):
+
+```sh
+cd src/cub200
+python eval_acc.py --load cub_res101_p5
+```
+This will report the classification accuracy on the test set of CUB-200.
 
 ## References
 If you are using our code, please consider citing our paper.
@@ -117,5 +173,16 @@ If you are using CelebA dataset, please cite
  booktitle = {Proceedings of International Conference on Computer Vision (ICCV)},
  month = {December},
  year = {2015}
+}
+```
+
+If you are using CUB-200 dataset, please cite
+```
+@techreport{WahCUB_200_2011,
+Title = {{The Caltech-UCSD Birds-200-2011 Dataset}},
+Author = {Wah, C. and Branson, S. and Welinder, P. and Perona, P. and Belongie, S.},
+Year = {2011}
+Institution = {California Institute of Technology},
+Number = {CNS-TR-2011-001}
 }
 ```

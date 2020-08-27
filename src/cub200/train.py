@@ -18,6 +18,8 @@ import torchvision.models as models
 from model import ResNet101, ResNet50
 
 # import utils and loss
+import sys
+sys.path.append(os.path.abspath('../common'))
 from utils import *
 from loss import *
 
@@ -25,14 +27,14 @@ from loss import *
 from torch.utils.tensorboard.writer import SummaryWriter
 
 # import dataset
-from datasets.celeba import *
+from cub200 import *
 
 # benchmark before running
 cudnn.benchmark = True
 
 # arguments for the script itself
 parser = argparse.ArgumentParser(description='Interpretable network Training')
-parser.add_argument('--config', default='../cub_config.json', type=str, help='path for the training config file')
+parser.add_argument('--config', default='../../cub_res101.json', type=str, help='path for the training config file')
 parser.add_argument('--config-help', action='store_true', help='usage for each arguments in the config file')
 args_main = parser.parse_args()
 
@@ -77,10 +79,6 @@ else:
 # create the folder for checkpoint
 if os.path.exists(check_dir) is False:
     os.makedirs(check_dir)
-
-# create the folder for dataset
-if os.path.exists(data_dir) is False:
-    os.makedirs(data_dir)
 
 # create the folder for tensorboard writer
 if os.path.exists(tensorboard_dir) is False:
@@ -132,42 +130,34 @@ def main():
 
     # data augmentation
     train_transforms = transforms.Compose([
-        transforms.Resize(size=(256, 256)),
+        transforms.Resize(size=448),
         transforms.RandomHorizontalFlip(),
         transforms.ColorJitter(0.1),
+        transforms.RandomCrop(size=448),
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         ])
-    val_transforms = transforms.Compose([
-        transforms.Resize(size=(256, 256)),
+    test_transforms = transforms.Compose([
+        transforms.Resize(size=448),
+        transforms.CenterCrop(size=448),
         transforms.ToTensor(),
         transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
         ])
 
     # wrap to dataset
-    if args['split'] == 'accuracy':
-        train_data = CelebA(data_dir, split='train_full', align=True,
-        percentage=None, transform=train_transforms, resize=(256, 256))
-        val_data = CelebA(data_dir, split='val', align=True,
-        percentage=None, transform=val_transforms, resize=(256, 256))
-    elif args['split'] == 'interpretability':
-        train_data = CelebA(data_dir, split='train', align=False,
-        percentage=0.3, transform=train_transforms, resize=(256, 256))
-        val_data = CelebA(data_dir, split='val', align=False,
-        percentage=0.3, transform=val_transforms, resize=(256, 256))
-    else:
-        raise(RuntimeError("Please choose either \'accuracy\' or \'interpretability\' for data split."))
+    train_data = CUB200(root=data_dir, train=True, transform=train_transforms)
+    test_data = CUB200(root=data_dir, train=False, transform=test_transforms)
 
     # wrap to dataloader
     train_loader = torch.utils.data.DataLoader(
         train_data, batch_size=args['batch_size'], shuffle=True,
         num_workers=args['workers'], pin_memory=False, drop_last=True)
-    val_loader = torch.utils.data.DataLoader(
-        val_data, batch_size=args['batch_size'], shuffle=False,
+    test_loader = torch.utils.data.DataLoader(
+        test_data, batch_size=args['batch_size'], shuffle=False,
         num_workers=args['workers'], pin_memory=True)
 
     # define loss function (criterion) and optimizer
-    criterion = torch.nn.BCEWithLogitsLoss().cuda()
+    criterion = torch.nn.CrossEntropyLoss().cuda()
 
     # fix/finetune several layers
     fixed_layers = args['fixed']
@@ -190,7 +180,8 @@ def main():
         ], weight_decay=args['weight_decay'], momentum=0.9)
 
     # define the MultiStep learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=[5], gamma=0.1)
+    num_iters = len(train_loader)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, num_iters * args['epochs'])
 
     # load the scheduler from the checkpoint if needed
     if args['resume'] != '':
@@ -202,19 +193,14 @@ def main():
     for epoch in range(start_epoch, args['epochs']):
 
         # training
-        train(train_loader, model, criterion, optimizer, epoch)
+        train(train_loader, model, criterion, optimizer, epoch, scheduler)
 
-        # evaluate on val set
-        acc_per_attr, acc = validate(val_loader, model, criterion, epoch)
-
-        # LR scheduler
-        scheduler.step()
+        # evaluate on test set
+        acc = test(test_loader, model, criterion, epoch)
 
         # remember best acc and save checkpoint
         is_best = acc > best_acc
-        if is_best:
-            best_acc = acc
-            best_per_attr = acc_per_attr
+        best_acc = max(acc, best_acc)
         save_checkpoint({
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
@@ -228,21 +214,16 @@ def main():
 
     # print the overall best acc and close the writer
     print('Training finished...')
-    with open(os.path.join(log_dir, "acc_per_attr.txt"), 'w') as logfile:
-        for k in range(args['num_classes']):
-            logfile.write('%s: %.4f\n' % (celeba_attr[k], best_per_attr[k].avg))
-    print('Per-attribute accuracy on val set has been written to acc_per_attr.txt under the log folder')
-    print('Best average accuracy on val set is: %.4f.' % best_acc)
-
+    print('Best accuracy on test set is: %.4f.' % best_acc)
     writer.close()
 
-def train(train_loader, model, criterion, optimizer, epoch):
+def train(train_loader, model, criterion, optimizer, epoch, scheduler):
 
     # set up the averagemeters
     batch_time = AverageMeter()
-    pred_losses = [AverageMeter() for _ in range(args['num_classes'])]
+    pred_losses = AverageMeter()
     shaping_losses = AverageMeter()
-    accs = [AverageMeter() for _ in range(args['num_classes'])]
+    acc = AverageMeter()
     num_iters = len(train_loader)
 
     # switch to train mode
@@ -252,7 +233,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
     end = time.time()
 
     # training step
-    for i, (input, target, _) in enumerate(train_loader):
+    for i, (input, target, _, _) in enumerate(train_loader):
 
         # data to gpu
         input = input.cuda()
@@ -261,40 +242,24 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # compute output
         output, _, assign = model(input)
 
-        # compute the prediction loss accuracy by attribute
-        pred_loss = []
-        acc = []
-        for j in range(len(output)):
-
-            # prediction loss and accuracy for jth attribute
-            pred_loss.append(criterion(output[j].squeeze(1), target[:, j].float()))
-            acc.append(accuracy(output[j], target[:, j]))
-
-            # keep track of the prediction loss and accuracy by categories
-            pred_losses[j].update(pred_loss[j].data.item(), input.size(0))
-            accs[j].update(acc[j].item(), input.size(0))
-
-        # for tensorboard log
-        # calculate mean (categories) value of loss and acc for the current batch
-        losses_mean = sum([pred_loss[k].data.item() for k in range(len(output))]) / len(output)
-        acc_mean = sum([acc[k].data.item() for k in range(len(output))]) / len(output)
-
-        # calculate the mean (categories) value of averaged (batches so far) loss and acc
-        avglosses_mean = sum([pred_losses[k].avg for k in range(len(output))]) / len(output)
-        avgacc_mean = sum([accs[k].avg for k in range(len(output))]) / len(output)
+        # compute the prediction loss and the shaping loss
+        pred_loss = criterion(output, target)
+        shaping_loss = ShapingLoss(assign, args['radius'], args['std'], args['nparts'], args['alpha'], args['beta'])
 
         # calculate the loss for bp
-        pred_loss_mean = sum(pred_loss) / len(pred_loss)
-        shaping_loss = ShapingLoss(assign, args['radius'], args['std'], args['nparts'], args['alpha'], args['beta'])
-        loss = pred_loss_mean + args['coeff'] * shaping_loss
+        loss = pred_loss + args['coeff'] * shaping_loss
 
-        # record the shaping loss for tensorboard log
+        # record the losses and accuracy for tensorboard log
+        acc1 = accuracy(output.data, target)[0]
+        pred_losses.update(pred_loss.data.item(), input.size(0))
         shaping_losses.update(shaping_loss.item(), input.size(0))
+        acc.update(acc1.item(), input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         # measure elapsed time
         torch.cuda.synchronize()
@@ -305,25 +270,28 @@ def train(train_loader, model, criterion, optimizer, epoch):
         if i % args['print_freq'] == 0:
             print('Epoch: [{0}][{1}/{2}]\t'
                   'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Cls_Loss {loss_val:.4f} ({loss_avg:.4f})\t'
+                  'Cls_Loss {loss.val:.4f} ({loss.avg:.4f})\t'
                   'Shaping_Loss {shaping_loss.val:.4f} ({shaping_loss.avg:.4f})\t'
-                  'Avg_acc {acc_val:.3f} ({acc_avg:.3f})'.format(
+                  'Acc {acc.val:.3f} ({acc.avg:.3f})'.format(
                    epoch, i, len(train_loader), batch_time=batch_time,
-                   loss_val=losses_mean, loss_avg=avglosses_mean, shaping_loss=shaping_losses, acc_val=acc_mean, acc_avg=avgacc_mean), flush=True)
+                   loss=pred_losses, shaping_loss=shaping_losses, acc=acc), flush=True)
             # record the current loss status with tensorboard
-            writer.add_scalar('data/pred_loss', losses_mean, epoch * num_iters + i)
+            writer.add_scalar('data/pred_loss', pred_losses.val, epoch * num_iters + i)
             writer.add_scalar('data/shaping_loss', shaping_losses.val, epoch * num_iters + i)
 
+    # print the learning rate
+    lr = scheduler.get_lr()[0]
+    print("Epoch {:d} finished with lr={:f}".format(epoch + 1, lr))
     # record the current accuracy status with tensorboard
-    writer.add_scalars('data/accuracy', {"train" : avgacc_mean}, epoch + 1)
+    writer.add_scalars('data/accuracy', {"train" : acc.avg}, epoch + 1)
 
-def validate(val_loader, model, criterion, epoch):
+def test(test_loader, model, criterion, epoch):
 
     # set up the averagemeters
     batch_time = AverageMeter()
-    pred_losses = [AverageMeter() for _ in range(args['num_classes'])]
+    pred_losses = AverageMeter()
     shaping_losses = AverageMeter()
-    accs = [AverageMeter() for _ in range(args['num_classes'])]
+    acc = AverageMeter()
 
     # switch to evaluate mode
     model.eval()
@@ -331,9 +299,9 @@ def validate(val_loader, model, criterion, epoch):
     # record the time
     end = time.time()
 
-    # validating
+    # testing
     with torch.no_grad():
-        for i, (input, target, _) in enumerate(val_loader):
+        for i, (input, target, _, _) in enumerate(test_loader):
 
             # data to gpu
             input = input.cuda()
@@ -342,59 +310,39 @@ def validate(val_loader, model, criterion, epoch):
             # inference the model
             output, _, assign = model(input)
 
-            # list to store prediction loss & accuracy by attribute
-            pred_loss = []
-            acc = []
-            for j in range(len(output)):
-
-                # prediction loss and accuracy for jth attribute
-                pred_loss.append(criterion(output[j].squeeze(1), target[:, j].float()))
-                acc.append(accuracy(output[j], target[:, j]))
-
-                # keep track of the prediction loss and accuracy by categories
-                pred_losses[j].update(pred_loss[j].data.item(), input.size(0))
-                accs[j].update(acc[j].item(), input.size(0))
-
-            # for tensorboard log
-            # calculate mean (categories) value of loss and acc for the current batch
-            losses_mean = sum([pred_loss[k].data.item() for k in range(len(output))]) / len(output)
-            acc_mean = sum([acc[k].data.item() for k in range(len(output))]) / len(output)
-
-            # calculate the mean (categories) value of averaged (batches so far) loss and acc
-            avglosses_mean = sum([pred_losses[k].avg for k in range(len(output))]) / len(output)
-            avgacc_mean = sum([accs[k].avg for k in range(len(output))]) / len(output)
-
-            # calculate the losses
-            pred_loss_mean = sum(pred_loss) / len(pred_loss)
+            # compute the prediction loss and the shaping loss
+            pred_loss = criterion(output, target)
             shaping_loss = ShapingLoss(assign, args['radius'], args['std'], args['nparts'], args['alpha'], args['beta'])
 
-            # record the shaping loss for tensorboard log
+            # record the losses and accuracy for tensorboard log
+            acc1 = accuracy(output.data, target)[0]
+            pred_losses.update(pred_loss.data.item(), input.size(0))
             shaping_losses.update(shaping_loss.item(), input.size(0))
+            acc.update(acc1.item(), input.size(0))
 
             # measure elapsed time
             torch.cuda.synchronize()
             batch_time.update(time.time() - end)
             end = time.time()
 
-            # print the current validation status
+            # print the current testing status
             if i % args['print_freq'] == 0:
-                print('Val: [{0}/{1}]\t'
-                    'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                    'Cls_Loss {loss_val:.4f} ({loss_avg:.4f})\t'
-                    'Shaping_Loss {shaping_loss.val:.4f} ({shaping_loss.avg:.4f})\t'
-                    'Avg_acc {acc_val:.3f} ({acc_avg:.3f})'.format(
-                    i, len(val_loader), batch_time=batch_time, loss_val=losses_mean,
-                    loss_avg=avglosses_mean, shaping_loss=shaping_losses,
-                    acc_val=acc_mean, acc_avg=avgacc_mean), flush=True)
+                print('Test: [{0}/{1}]\t'
+                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
+                      'Cls_Loss {loss.val:.4f} ({loss.avg:.4f})\t'
+                      'Shaping_Loss {shaping_loss.val:.4f} ({shaping_loss.avg:.4f})\t'
+                      'Acc {acc.val:.3f} ({acc.avg:.3f})'.format(
+                      i, len(test_loader), batch_time=batch_time,
+                      loss=pred_losses, shaping_loss=shaping_losses, acc=acc), flush=True)
 
-    # print the accuracy after the validating
-    print(' \033[92m* Accuracy: {acc_avg:.3f}\033[0m'.format(acc_avg=avgacc_mean))
+    # print the accuracy after the testing
+    print(' \033[92m* Accuracy: {acc.avg:.3f}\033[0m'.format(acc=acc))
 
     # record the accuracy with tensorboard
-    writer.add_scalars('data/accuracy', {"val" : avgacc_mean}, epoch + 1)
+    writer.add_scalars('data/accuracy', {"test" : acc.avg}, epoch + 1)
 
     # return the accuracy
-    return accs, avgacc_mean
+    return acc.avg
 
 
 if __name__ == '__main__':

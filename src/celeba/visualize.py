@@ -23,8 +23,11 @@ import argparse
 import random
 
 # dataset, utils and model
+import sys
+import os
+sys.path.append(os.path.abspath('../common'))
 from utils import *
-from datasets.celeba import *
+from celeba import *
 from model import ResNet101, ResNet50
 
 # fix all the randomness for reproducibility
@@ -137,7 +140,7 @@ def plot_assignment(root, assign_hard, num_parts):
 def main():
 
     # load the config file
-    config_file = '../log/'+ args.load +'/train_config.json'
+    config_file = '../../log/'+ args.load +'/train_config.json'
     with open(config_file) as fi:
         config = json.load(fi)
         print(" ".join("\033[96m{}\033[0m: {},".format(k, v) for k, v in config.items()))
@@ -152,10 +155,10 @@ def main():
 
     # define test dataset and loader
     if config['split'] == 'accuracy':
-        dataset = CelebA('../data/celeba', split='test', align=True,
+        dataset = CelebA('../../data/celeba', split='test', align=True,
             percentage=None, transform=test_transforms, resize=(256, 256))
     elif config['split'] == 'interpretability':
-        dataset = CelebA('../data/celeba', split='test', align=False,
+        dataset = CelebA('../../data/celeba', split='test', align=False,
             percentage=0.3, transform=test_transforms, resize=(256, 256))
     else:
         raise(RuntimeError("Please choose either \'accuracy\' or \'interpretability\' for data split."))
@@ -183,7 +186,7 @@ def main():
         raise(RuntimeError("Only support resnet50 or resnet101 for architecture!"))
 
     # load model
-    resume = '../checkpoints/'+args.load+'_best.pth.tar'
+    resume = '../../checkpoints/'+args.load+'_best.pth.tar'
     print("=> loading checkpoint '{}'".format(resume))
     checkpoint = torch.load(resume)
     # remove the module prefix
@@ -210,7 +213,7 @@ def main():
                     output_list, att_list, assign = model(input)
 
                 # define root for saving results and make directories correspondingly
-                root = os.path.join('../visualization', args.load, str(current_id))
+                root = os.path.join('../../visualization', args.load, str(current_id))
                 os.makedirs(root, exist_ok=True)
                 os.makedirs(os.path.join(root, 'attentions'), exist_ok=True)
                 os.makedirs(os.path.join(root, 'assignments'), exist_ok=True)
@@ -277,8 +280,8 @@ def main():
                     img.save(os.path.join(root, 'assignments', 'part_'+str(i)+'.png'))
 
         # save the array version
-        os.makedirs('../visualization/collected', exist_ok=True)
-        f_assign.savefig(os.path.join('../visualization/collected', args.load+'.png'))
+        os.makedirs('../../visualization/collected', exist_ok=True)
+        f_assign.savefig(os.path.join('../../visualization/collected', args.load+'.png'))
 
         print('Visualization finished!')
 

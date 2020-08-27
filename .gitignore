@@ -4,5 +4,6 @@ visualization/**
 tensorboard_log/**
 log/**
 data/celeba/**
+data/cub200/**
 !data/celeba/annotation.zip
 !data/celeba/data_processing.sh

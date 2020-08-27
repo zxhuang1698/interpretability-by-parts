@@ -1,7 +1,7 @@
 {
     "root": "root directory of the work space",
     "data": "which dataset to use, currently only support celeba",
-    "split": "which dataset split to use, accuracy | interpretability",
+    "split": "which dataset split to use, accuracy | interpretability (CelebA only)",
     "arch": "which base architecture to use: resnet101|resnet50",
     "resume": "path to checkpoint for loading",
     "save": "saving name for logs and checkpoints",

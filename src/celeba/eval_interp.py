@@ -13,7 +13,7 @@ import argparse
 import json
 
 # dataset and model
-from datasets.celeba import *
+from celeba import *
 from model import ResNet101, ResNet50
 
 # number of attributes and landmark annotations
@@ -111,11 +111,10 @@ def create_centers(data_loader, model, num_parts):
     eyedists_collection = []
 
     # iterating the data loader, landmarks shape: [N, num_landmarks, 2], column first
-    for i, (input, target, landmarks) in enumerate(data_loader):
+    for i, (input, _, landmarks) in enumerate(data_loader):
 
         # to device
         input = input.cuda()
-        target = target.cuda()
         landmarks = landmarks.cuda()
 
         # gather the landmark annotations and the center outputs
@@ -137,14 +136,14 @@ def create_centers(data_loader, model, num_parts):
             eye_dist = (col_dist * col_dist + row_dist * row_dist).sqrt()
             eyedists_collection.append(eye_dist)
 
-            # list into tensors
-            centers_tensor = torch.cat(centers_collection, dim=0)
-            annos_tensor = torch.cat(annos_collection, dim=0)
-            eyedists_tensor = torch.cat(eyedists_collection, dim=0)
+    # list into tensors
+    centers_tensor = torch.cat(centers_collection, dim=0)
+    annos_tensor = torch.cat(annos_collection, dim=0)
+    eyedists_tensor = torch.cat(eyedists_collection, dim=0)
 
-            # reshape the annotation and normalization tensor
-            annos_tensor = annos_tensor.contiguous().view(centers_tensor.shape[0], num_landmarks * 2)
-            eyedists_tensor = eyedists_tensor.contiguous().unsqueeze(1)
+    # reshape the annotation and normalization tensor
+    annos_tensor = annos_tensor.contiguous().view(centers_tensor.shape[0], num_landmarks * 2)
+    eyedists_tensor = eyedists_tensor.contiguous().unsqueeze(1)
 
     return centers_tensor, annos_tensor, eyedists_tensor
 
@@ -173,7 +172,7 @@ def L2_distance(prediction, annotation):
 def main():
 
     # load the config file
-    config_file = '../log/'+ args.load +'/train_config.json'
+    config_file = '../../log/'+ args.load +'/train_config.json'
     with open(config_file) as fi:
         config = json.load(fi)
         print(" ".join("\033[96m{}\033[0m: {},".format(k, v) for k, v in config.items()))
@@ -188,16 +187,16 @@ def main():
 
     # define dataset and loader
     assert config['split'] == 'interpretability'
-    fit_data = CelebA('../data/celeba',
+    fit_data = CelebA('../../data/celeba',
         split='fit', align=False, percentage=0.3, transform=data_transforms, resize=(256, 256))
-    eval_data = CelebA('../data/celeba',
+    eval_data = CelebA('../../data/celeba',
         split='eval', align=False, percentage=0.3, transform=data_transforms, resize=(256, 256))
     fit_loader = torch.utils.data.DataLoader(
         fit_data, batch_size=config['batch_size'], shuffle=False,
-        num_workers=6, pin_memory=False, drop_last=False)
+        num_workers=config['workers'], pin_memory=False, drop_last=False)
     eval_loader = torch.utils.data.DataLoader(
         eval_data, batch_size=config['batch_size'], shuffle=False,
-        num_workers=6, pin_memory=False, drop_last=False)
+        num_workers=config['workers'], pin_memory=False, drop_last=False)
 
     # load the model in eval mode
     if config['arch'] == 'resnet101':
@@ -207,7 +206,7 @@ def main():
     else:
         raise(RuntimeError("Only support resnet50 or resnet101 for architecture!"))
 
-    resume = '../checkpoints/'+args.load+'_best.pth.tar'
+    resume = '../../checkpoints/'+args.load+'_best.pth.tar'
     print("=> loading checkpoint '{}'".format(resume))
     checkpoint = torch.load(resume)
     model.load_state_dict(checkpoint['state_dict'], strict=True)

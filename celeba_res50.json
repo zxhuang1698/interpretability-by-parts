@@ -1,5 +1,5 @@
 {
-    "root": "../",
+    "root": "../../",
     "data": "celeba",
     "split": "interpretability",
     "arch": "resnet50",

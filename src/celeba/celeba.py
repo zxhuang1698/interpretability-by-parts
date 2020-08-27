@@ -20,19 +20,21 @@ class CelebA(data.Dataset):
     Variables
     ----------
         root, str: Root directory of the dataset.
-        split, str: Current data split. 
+        split, str: Current data split.
             "train": Training split without MAFL images. (For localization)
             "train_full": Training split with MAFL images. (For classification)
             "val": Validation split for classification accuracy.
             "test": Testing split for classification accuracy.
             "fit": Split for fitting the linear regressor.
             "eval": Split for evaluating the linear regressor.
-        align, bool: Whether use aligned version or not. 
+        align, bool: Whether use aligned version or not.
         percentage, float: For unaligned version, the least percentage of (face area / image area)
         transform, callable: A function/transform that takes in a PIL.Image and transforms it.
         resize, tuple: The size of image (h, w) after transformation (This version does not support cropping)
     """
-    def __init__(self, root, split='train', align=True, percentage=None, transform=None, resize=(256, 256)):
+    def __init__(self, root,
+                 split='train', align=True,
+                 percentage=None, transform=None, resize=(256, 256)):
 
         self.root = root
         self.split = split
@@ -50,7 +52,7 @@ class CelebA(data.Dataset):
             print('Data dictionary created and saved.')
         with open(save_name, 'rb') as handle:
             save_dict = pickle.load(handle)
-        
+
         self.images = save_dict['images']           # image filenames
         self.landmarks = save_dict['landmarks']     # 5 face landmarks
         self.targets = save_dict['targets']         # binary labels
@@ -76,8 +78,8 @@ class CelebA(data.Dataset):
             self.images = new_images
             self.landmarks = new_landmarks
             self.targets = new_targets
-            self.bboxes = new_bboxes                
-            self.sizes = new_sizes                  
+            self.bboxes = new_bboxes
+            self.sizes = new_sizes
 
         print('Number of samples in the ' + self.split + ' split: '+ str(len(self.images)))
 
@@ -90,7 +92,7 @@ class CelebA(data.Dataset):
         landmark = None
         full_img_list = []
         ann_file = 'list_attr_celeba.txt'
-        bbox_file = 'list_bbox_celeba.txt'          
+        bbox_file = 'list_bbox_celeba.txt'
         size_file = 'list_imsize_celeba.txt'
 
         if self.align is True:
@@ -159,7 +161,7 @@ class CelebA(data.Dataset):
             full_path_list = [os.path.join(self.root, 'aligned', filename) for filename in filename_list]
         else:
             full_path_list = [os.path.join(self.root, 'unaligned', filename) for filename in filename_list]
-        
+
         # create the dictionary and save it on the disk
         save_dict = {}
         save_dict['images'] = full_path_list
@@ -193,13 +195,14 @@ class CelebA(data.Dataset):
         sample = self.loader(path)
         target = self.targets[index]
         target = torch.LongTensor(target)
-        target = (target + 1) / 2
+        # -1/+1 -> 0/1 (note: using true division)
+        target = (target + 1) // 2
         width, height = sample.size
 
         # transform the image and target
         if self.transform is not None:
             sample = self.transform(sample)
-        
+
         # processing the landmarks
         landmark_locs = self.landmarks[index]
         landmark_locs = torch.LongTensor(landmark_locs).float()
@@ -210,4 +213,3 @@ class CelebA(data.Dataset):
 
     def __len__(self):
         return len(self.images)
-

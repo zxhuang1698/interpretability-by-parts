@@ -8,7 +8,10 @@ import time
 import json
 
 # dataset and model
-from datasets.celeba import *
+import sys
+import os
+sys.path.append(os.path.abspath('../common'))
+from celeba import *
 from utils import *
 from model import ResNet101, ResNet50
 
@@ -62,7 +65,7 @@ def test(test_loader, model):
             for j in range(len(output)):
 
                 # prediction accuracy for jth attribute
-                acc.append(accuracy(output[j], target[:, j]))
+                acc.append(accuracy_binary(output[j], target[:, j]))
 
                 # keep track of per category accuracy
                 accs[j].update(acc[j].item(), input.size(0))
@@ -91,7 +94,7 @@ def test(test_loader, model):
 def main():
 
     # load the config file
-    config_file = '../log/'+ args.load +'/train_config.json'
+    config_file = '../../log/'+ args.load +'/train_config.json'
     with open(config_file) as fi:
         config = json.load(fi)
         print(" ".join("\033[96m{}\033[0m: {},".format(k, v) for k, v in config.items()))
@@ -105,16 +108,16 @@ def main():
 
     # define test dataset and loader
     if config['split'] == 'accuracy':
-        test_data = CelebA('../data/celeba', split='test', align=True,
+        test_data = CelebA('../../data/celeba', split='test', align=True,
             percentage=None, transform=test_transforms, resize=(256, 256))
     elif config['split'] == 'interpretability':
-        test_data = CelebA('../data/celeba', split='test', align=False,
+        test_data = CelebA('../../data/celeba', split='test', align=False,
             percentage=0.3, transform=test_transforms, resize=(256, 256))
     else:
         raise(RuntimeError("Please choose either \'accuracy\' or \'interpretability\' for data split."))
     test_loader = torch.utils.data.DataLoader(
         test_data, batch_size=config['batch_size'], shuffle=False,
-        num_workers=6, pin_memory=False, drop_last=False)
+        num_workers=config['workers'], pin_memory=False, drop_last=False)
 
     # load the model in eval mode
     if config['arch'] == 'resnet101':
@@ -124,7 +127,7 @@ def main():
     else:
         raise(RuntimeError("Only support resnet50 or resnet101 for architecture!"))
 
-    resume = '../checkpoints/'+args.load+'_best.pth.tar'
+    resume = '../../checkpoints/'+args.load+'_best.pth.tar'
     print("=> loading checkpoint '{}'".format(resume))
     checkpoint = torch.load(resume)
     model.load_state_dict(checkpoint['state_dict'], strict=True)

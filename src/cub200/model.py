@@ -5,6 +5,9 @@ import torch.optim as optim
 import torch.nn.functional as F
 
 # import the grouping unit
+import sys
+import os
+sys.path.append(os.path.abspath('../common'))
 from grouping import GroupingUnit
 
 # wrap up the convolution
@@ -146,50 +149,33 @@ class ResNet(nn.Module):
         # the grouping module
         self.grouping = GroupingUnit(256*block.expansion, num_parts)
         self.grouping.reset_parameters(init_weight=None, init_smooth_factor=None)
-        
+
         # post-processing bottleneck block for the region features
-        self.post_block = nn.ModuleList()
-        self.post_block.append(nn.Sequential(
+        self.post_block = nn.Sequential(
             Bottleneck1x1(1024, 512, stride=1, downsample = nn.Sequential(
                 nn.Conv2d(1024, 2048, kernel_size=1, stride=1, bias=False),
                 nn.BatchNorm2d(2048))),
             Bottleneck1x1(2048, 512, stride=1),
             Bottleneck1x1(2048, 512, stride=1),
             Bottleneck1x1(2048, 512, stride=1),
-        ))
+        )
+
+
+        # an attention for each classification head
+        self.attconv = nn.Sequential(
+            Bottleneck1x1(1024, 256, stride=1),
+            Bottleneck1x1(1024, 256, stride=1),
+            nn.Conv2d(1024, 1, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.BatchNorm2d(1),
+            nn.ReLU(),
+        )
 
         # the final batchnorm
-        self.groupingbn = nn.BatchNorm2d(512*block.expansion)
-
-        # a bottleneck for each classification head
-        self.nonlinear = nn.ModuleList()
-        for i in range(num_classes):
-            self.nonlinear.append(
-                Bottleneck1x1(512*block.expansion, 128*block.expansion, stride=1)   
-            )
-        
-        # an attention for each classification head
-        self.attconv = nn.ModuleList()
-        for i in range(num_classes):
-            self.attconv.append(nn.Sequential(
-                nn.Conv2d(1024, 256, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm2d(256),
-                nn.ReLU(),
-                nn.Conv2d(256, 32, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm2d(32),
-                nn.ReLU(),
-                nn.Conv2d(32, 1, kernel_size=1, stride=1, padding=0, bias=True),
-                nn.BatchNorm2d(1),
-                nn.ReLU(),
-                ))
+        self.groupingbn = nn.BatchNorm2d(2048)
 
         # linear classifier for each attribute
-        self.mylinear = nn.ModuleList()
-        for i in range(num_classes):
-            self.mylinear.append(
-                nn.Linear(512*block.expansion, 1)
-            )
-        
+        self.mylinear = nn.Linear(2048, num_classes)
+
         # initialize convolutional layers with kaiming_normal_, BatchNorm with weight 1, bias 0
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -198,7 +184,7 @@ class ResNet(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-        # initialize the last bn in residual blocks with weight zero   
+        # initialize the last bn in residual blocks with weight zero
         for m in self.modules():
             if isinstance(m, Bottleneck) or isinstance(m, Bottleneck1x1):
                 nn.init.constant_(m.bn3.weight, 0)
@@ -223,11 +209,7 @@ class ResNet(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def forward(self, x, kmeans=False):
-
-        # create lists for both outputs and attentions
-        out_list = []
-        att_list = []
+    def forward(self, x):
 
         # the resnet backbone
         x = self.conv1(x)
@@ -238,53 +220,38 @@ class ResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
 
-        # if inference for initialize dictionary, simply return the feature map
-        if kmeans == True:
-            return x
-
         # grouping module upon the feature maps outputed by the backbone
         region_feature, assign = self.grouping(x)
         region_feature = region_feature.contiguous().unsqueeze(3)
 
         # generate attention
-        for i in range(self.num_classes):
-            att = self.attconv[i](region_feature)
-            att = F.softmax(att, dim=2)
-            att_list.append(att)
+        att = self.attconv(region_feature)
+        att = F.softmax(att, dim=2)
 
         # non-linear layers over the region features
-        for layer in self.post_block:
-            region_feature = layer(region_feature)
+        region_feature = self.post_block(region_feature)
 
         # attention-based classification
-        for i in range(self.num_classes):
-        
-            # apply the attention on the features
-            out = region_feature.clone() * att_list[i]
-            out = out.contiguous().squeeze(3) 
+        # apply the attention on the features
+        out = region_feature * att
+        out = out.contiguous().squeeze(3)
 
-            # average all region features into one vector based on the attention
-            out = F.avg_pool1d(out, self.n_parts) * self.n_parts
-            out = out.contiguous().unsqueeze(3) 
+        # average all region features into one vector based on the attention
+        out = F.avg_pool1d(out, self.n_parts) * self.n_parts
+        out = out.contiguous().unsqueeze(3)
 
-            # final batchnorm
-            out = self.groupingbn(out)
+        # final bn
+        out = self.groupingbn(out)
 
-            # nonlinear block for each head
-            out = self.nonlinear[i](out)
-            
-            # linear classifier
-            out = out.contiguous().view(out.size(0), -1)
-            out = self.mylinear[i](out)
+        # linear classifier
+        out = out.contiguous().view(out.size(0), -1)
+        out = self.mylinear(out)
 
-            # append the output
-            out_list.append(out)
-
-        return out_list, att_list, assign
+        return out, att, assign
 
 # model wrapper
-def ResNet50(num_classes, num_parts=8):
+def ResNet50(num_classes, num_parts=5):
     return ResNet(Bottleneck, [3, 4, 6, 3], num_classes, num_parts)
 
-def ResNet101(num_classes, num_parts=8):
+def ResNet101(num_classes, num_parts=5):
     return ResNet(Bottleneck, [3, 4, 23, 3], num_classes, num_parts)
