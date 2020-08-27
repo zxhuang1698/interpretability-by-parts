@@ -6,7 +6,7 @@ Code repository for our paper "Interpretable and Accurate Fine-grained Recogniti
 
 [[Project Page]](https://www.biostat.wisc.edu/~yli/cvpr2020-interp/)  [[Paper]](https://arxiv.org/abs/2005.10411)
 
-The repository is still under construction. The full training, inference and evaluation pipeline on CelebA dataset is currently included.
+The repository includes full training and evaluation code for CelebA and CUB-200-2011 datasets.
 
 
 ## Dependencies
